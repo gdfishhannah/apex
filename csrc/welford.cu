@@ -1,6 +1,7 @@
 #include <iostream>
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/cuda/CUDAContext.h>
 
 
 #include <cuda.h>
@@ -326,10 +327,11 @@ std::vector<at::Tensor> welford_mean_var_CUDA(const at::Tensor input) {
   
   // shared memory used for reduce on mean, var, num_elements;
   int smem_size = block_y * block_x * (sizeof(int) + 2 * get_element_data_size(input, true));
+  auto stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "welford_mean_var_kernel", ([&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
-    welford_kernel<scalar_t, accscalar_t, accscalar_t><<<grid, block, smem_size>>>(
+    welford_kernel<scalar_t, accscalar_t, accscalar_t><<<grid, block, smem_size, stream>>>(
         input.data<scalar_t>(),
         out_mean.data<accscalar_t>(),
         out_var.data<accscalar_t>(),
@@ -358,11 +360,12 @@ at::Tensor batchnorm_forward_CUDA(
   int block = min(MAX_BLOCK_SIZE, h_next_pow2(space_size));
   // TODO(jie): should I do 1 block per feature?
   const dim3 grid(feature_size, batch_size);
+  auto stream = at::cuda::getCurrentCUDAStream();
 
   if (input.type().scalarType() == at::ScalarType::Half && weight.type().scalarType() == at::ScalarType::Float) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "batchnorm_forward", ([&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
-      batchnorm_forward_kernel<scalar_t, accscalar_t, accscalar_t><<<grid, block>>>(
+      batchnorm_forward_kernel<scalar_t, accscalar_t, accscalar_t><<<grid, block, 0, stream>>>(
           input.data<scalar_t>(),
           mean.data<accscalar_t>(),
           var.data<accscalar_t>(),
@@ -376,7 +379,7 @@ at::Tensor batchnorm_forward_CUDA(
     AT_CHECK(input.type().scalarType() == weight.type().scalarType(), "input.type().scalarType() is not supported with weight.type().scalarType()"); 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "batchnorm_forward", ([&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
-      batchnorm_forward_kernel<scalar_t, accscalar_t, scalar_t><<<grid, block>>>(
+      batchnorm_forward_kernel<scalar_t, accscalar_t, scalar_t><<<grid, block, 0, stream>>>(
           input.data<scalar_t>(),
           mean.data<accscalar_t>(),
           var.data<accscalar_t>(),
@@ -416,11 +419,12 @@ std::vector<at::Tensor> reduce_bn_CUDA(
   const dim3 grid(feature_size);
   // shared memory used for reduce on sum_dy, sum_dy_xmu;
   int smem_size = block_y * block_x * 2 * get_element_data_size(input, true);
+  auto stream = at::cuda::getCurrentCUDAStream();
 
   if (input.type().scalarType() == at::ScalarType::Half && weight.type().scalarType() == at::ScalarType::Float) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "batchnorm_backward_reduce", ([&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
-      reduce_bn_kernel<scalar_t, accscalar_t, accscalar_t><<<grid, block, smem_size>>>(
+      reduce_bn_kernel<scalar_t, accscalar_t, accscalar_t><<<grid, block, smem_size, stream>>>(
           input.data<scalar_t>(),
           grad_output.data<scalar_t>(),
           mean.data<accscalar_t>(),
@@ -438,7 +442,7 @@ std::vector<at::Tensor> reduce_bn_CUDA(
     AT_CHECK(input.type().scalarType() == weight.type().scalarType(), "input.type().scalarType() is not supported with weight.type().scalarType()"); 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "batchnorm_backward_reduce", ([&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
-      reduce_bn_kernel<scalar_t, accscalar_t, scalar_t><<<grid, block, smem_size>>>(
+      reduce_bn_kernel<scalar_t, accscalar_t, scalar_t><<<grid, block, smem_size, stream>>>(
           input.data<scalar_t>(),
           grad_output.data<scalar_t>(),
           mean.data<accscalar_t>(),
@@ -476,11 +480,12 @@ at::Tensor batchnorm_backward_CUDA(
   int block = min(MAX_BLOCK_SIZE, h_next_pow2(space_size));
   // TODO(jie): should I do 1 block per feature?
   const dim3 grid(feature_size, batch_size);
+  auto stream = at::cuda::getCurrentCUDAStream();
 
   if (input.type().scalarType() == at::ScalarType::Half && weight.type().scalarType() == at::ScalarType::Float) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "batchnorm_backward", ([&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
-      batchnorm_backward_kernel<scalar_t, accscalar_t, accscalar_t><<<grid, block>>>(
+      batchnorm_backward_kernel<scalar_t, accscalar_t, accscalar_t><<<grid, block, 0, stream>>>(
           grad_output.data<scalar_t>(),
           input.data<scalar_t>(),
           mean.data<accscalar_t>(),
@@ -496,7 +501,7 @@ at::Tensor batchnorm_backward_CUDA(
     AT_CHECK(input.type().scalarType() == weight.type().scalarType(), "input.type().scalarType() is not supported with weight.type().scalarType()"); 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "batchnorm_backward", ([&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
-      batchnorm_backward_kernel<scalar_t, accscalar_t, scalar_t><<<grid, block>>>(
+      batchnorm_backward_kernel<scalar_t, accscalar_t, scalar_t><<<grid, block, 0, stream>>>(
           grad_output.data<scalar_t>(),
           input.data<scalar_t>(),
           mean.data<accscalar_t>(),
@@ -526,10 +531,11 @@ std::vector<at::Tensor> welford_parallel_CUDA(const at::Tensor mean_feature_node
   const dim3 grid(feature_size);
   // shared memory used for reduce on mean, var, num_elements;
   int smem_size = world_size * (sizeof(int) + 2 * get_element_data_size(mean_feature_nodes, true));
+  auto stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(mean_feature_nodes.type(), "welford_parallel_kernel", ([&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
-    welford_kernel_parallel<scalar_t, accscalar_t><<<grid, block, smem_size>>>(
+    welford_kernel_parallel<scalar_t, accscalar_t><<<grid, block, smem_size, stream>>>(
         mean_feature_nodes.data<scalar_t>(),
         var_biased.data<scalar_t>(),
         out_mean.data<scalar_t>(),
