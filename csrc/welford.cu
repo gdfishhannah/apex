@@ -70,8 +70,8 @@ __device__ __forceinline__ T reduce_block(T *x, T val)
   return val;
 }
 
-#define TILE_W 16
-#define MAX_BLOCK_SIZE 1024
+#define TILE_W 32
+#define MAX_BLOCK_SIZE 256
 
 template<typename T>
 __device__ __forceinline__ void warp_reduce_mean_m2n(T &mean, T &m2n, int &num)
@@ -79,11 +79,13 @@ __device__ __forceinline__ void warp_reduce_mean_m2n(T &mean, T &m2n, int &num)
   #pragma unroll
   for(int i = WARP_SIZE/2; i > 0; i >>= 1) {
     auto num_new = num + __shfl_down_sync(0xffffffff, num, i);
-    auto dif_mean = mean - __shfl_down_sync(0xffffffff, mean, i);
-    mean = (__shfl_down_sync(0xffffffff, mean, i)*__shfl_down_sync(0xffffffff, num, i)
-            + mean * num) / num_new;
-    m2n += __shfl_down_sync(0xffffffff, m2n, i) + dif_mean*dif_mean*num*__shfl_down_sync(0xffffffff, num, i)/num_new;
-    num = num_new;
+    if (num_new != 0) {
+      auto dif_mean = mean - __shfl_down_sync(0xffffffff, mean, i);
+      mean = (__shfl_down_sync(0xffffffff, mean, i)*__shfl_down_sync(0xffffffff, num, i)
+              + mean * num) / num_new;
+      m2n += __shfl_down_sync(0xffffffff, m2n, i) + dif_mean*dif_mean*num*__shfl_down_sync(0xffffffff, num, i)/num_new;
+      num = num_new;
+    }
   }
 }
 
@@ -347,12 +349,11 @@ std::vector<at::Tensor> welford_mean_var_CUDA(const at::Tensor input) {
   at::Tensor out_var_biased = at::native::empty({feature_size}, input.options().dtype(scalar_type));
   at::Tensor out_mean = at::native::empty({feature_size}, input.options().dtype(scalar_type));
 
-  // TODO(jie): this launch config will be really bad for resnet, where batch_size is big and space_size is small.
-  int block_x = min(h_last_pow2(space_size), MAX_BLOCK_SIZE);
-  int block_y = min(int(batch_size), int(MAX_BLOCK_SIZE / block_x));
+  int block_x = TILE_W;
+  int block_y = min(h_last_pow2(batch_size), int(MAX_BLOCK_SIZE / block_x));
   const dim3 block(block_x, block_y);
   const dim3 grid(feature_size);
-  
+
   // shared memory used for reduce on mean, var, num_elements;
   auto stream = at::cuda::getCurrentCUDAStream();
 
@@ -440,8 +441,8 @@ std::vector<at::Tensor> reduce_bn_CUDA(
 
   auto space_size = get_tensor_spatial_size(input);
 
-  int block_x = min(h_last_pow2(space_size), MAX_BLOCK_SIZE);
-  int block_y = min(int(batch_size), int(MAX_BLOCK_SIZE / block_x));
+  int block_x = TILE_W;
+  int block_y = min(h_last_pow2(batch_size), int(MAX_BLOCK_SIZE / block_x));
   const dim3 block(block_x, block_y);
   const dim3 grid(feature_size);
   // shared memory used for reduce on sum_dy, sum_dy_xmu;
