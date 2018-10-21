@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # install package
-pip install torch torchvision
-pip uninstall Pillow
-pip install Pillow-SIMD==5.2.0.post0
+pip install torch torchvision -y
+pip uninstall Pillow -y
+pip install Pillow-SIMD==5.2.0.post0 -y
 
 
 # create dataset
