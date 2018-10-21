@@ -50,7 +50,7 @@ parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
 parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)')
-parser.add_argument('--print-freq', '-p', default=10, type=int,
+parser.add_argument('--print-freq', '-p', default=1, type=int,
                     metavar='N', help='print frequency (default: 10)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
@@ -92,6 +92,10 @@ args = parser.parse_args()
 
 def main():
     global best_prec1, args
+    
+    main_start = time.time()
+    if args.local_rank == 0:
+        print('main() start at: %.0f' % main_start)
 
     args.distributed = False
     if 'WORLD_SIZE' in os.environ:
@@ -126,7 +130,7 @@ def main():
         # computation in the backward pass.
         # model = DDP(model)
         # delay_allreduce delays all communication to the end of the backward pass.
-        model = DDP(model, delay_allreduce=True)
+        model = DDP(model) #, delay_allreduce=True)
 
     global model_params, master_params
     if args.fp16:
@@ -139,6 +143,7 @@ def main():
 
     # Scale learning rate based on global batch size
     args.lr = args.lr*float(args.batch_size*args.world_size)/256. 
+    print(args)
     optimizer = torch.optim.SGD(master_params, args.lr,
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
@@ -208,7 +213,8 @@ def main():
     if args.evaluate:
         validate(val_loader, model, criterion)
         return
-
+    
+    val_time = 0
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             train_sampler.set_epoch(epoch)
@@ -217,8 +223,11 @@ def main():
         train(train_loader, model, criterion, optimizer, epoch)
         if args.prof:
             break
+        
         # evaluate on validation set
+        val_start = time.time()
         prec1 = validate(val_loader, model, criterion)
+        val_time += time.time() - val_start
 
         # remember best prec@1 and save checkpoint
         if args.local_rank == 0:
@@ -237,6 +246,10 @@ def main():
                     checkpoint_dict['master_params'] = master_params
                 save_checkpoint(checkpoint_dict, is_best)
             create_and_save_checkpoint()
+        
+        if args.local_rank == 0:
+            print('validate() used: %.0fs' % val_time)
+            print('main() used: %.0fs' % (time.time() - main_start))
 
 class data_prefetcher():
     def __init__(self, loader):
@@ -302,6 +315,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
         target_var = Variable(target)
 
         # compute output
+        fp_start = time.time()
         output = model(input_var)
         loss = criterion(output, target_var)
 
@@ -318,8 +332,13 @@ def train(train_loader, model, criterion, optimizer, epoch):
         losses.update(to_python_float(reduced_loss), input.size(0))
         top1.update(to_python_float(prec1), input.size(0))
         top5.update(to_python_float(prec5), input.size(0))
+        
+        torch.cuda.synchronize()
+        fp_time = time.time() - fp_start
 
         loss = loss*args.static_loss_scale
+        bp_start = time.time()
+        
         # compute gradient and do SGD step
         if args.fp16:
             model.zero_grad()
@@ -337,6 +356,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
 
         torch.cuda.synchronize()
         # measure elapsed time
+        bp_time = time.time() - bp_start
         batch_time.update(time.time() - end)
 
         end = time.time()
@@ -354,8 +374,8 @@ def train(train_loader, model, criterion, optimizer, epoch):
                    args.world_size * args.batch_size / batch_time.val,
                    args.world_size * args.batch_size / batch_time.avg,
                    batch_time=batch_time,
-                   data_time=data_time, loss=losses, top1=top1, top5=top5))
-
+                   data_time=data_time, loss=losses, top1=top1, top5=top5), end=' ')
+            print('fp_time=%.3f bp_time=%.3f' % (fp_time, bp_time))
 
 def validate(val_loader, model, criterion):
     batch_time = AverageMeter()
