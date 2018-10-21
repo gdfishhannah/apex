@@ -42,7 +42,3 @@ apex_dir=/root/apex
 cd $apex_dir
 python uninstall apex -y
 python setup.py install
-
-cd $apex_dir/examples/imagenet/
-chmod a+x *.sh
-./DDP.sh
