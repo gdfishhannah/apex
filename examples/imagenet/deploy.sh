@@ -1,9 +1,12 @@
 #!/bin/bash
 
+# install package
 pip install torch torchvision
 pip uninstall Pillow
 pip install Pillow-SIMD
 
+
+# create dataset
 imagefile="/home/ImageNet"
 
 if [ ! -x "$imagefile" ]; then
@@ -32,4 +35,6 @@ done
 
 cp -r /home/ImageNet/train /home/ImageNet/val
 
-git clone https://github.com/apex/apex.git
+
+# download code 
+git clone https://github.com/gdfishhannah/apex.git
