@@ -9,7 +9,7 @@ workers=6 #一个gpu对应几个进程异步读取数据
 model=resnet50
 #use_fp16="--fp16"
 use_prof="--prof"
-data=/home/distributed-training/resnet-pytorch-xu
+data=/home/ImageNet
 
 for ((i=0; i<${#gpu_num_pool[@]}; i++)) # 以gpu数为最外层循环，gpu多跑得快
 do
