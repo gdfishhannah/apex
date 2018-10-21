@@ -38,6 +38,10 @@ fi
 # download code
 if [ ! -x "apex" ]; then
         git clone https://github.com/gdfishhannah/apex.git
+elif
+        cd apex
+        git pull
+        cd ..
 fi
 cd apex
 python uninstall apex -y
