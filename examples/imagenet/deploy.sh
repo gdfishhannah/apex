@@ -3,7 +3,7 @@
 # install package
 pip install torch torchvision
 pip uninstall Pillow
-pip install Pillow-SIMD
+pip install Pillow-SIMD==5.2.0.post0
 
 
 # create dataset
