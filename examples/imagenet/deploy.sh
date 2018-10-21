@@ -35,17 +35,12 @@ if [ ! -x "$imagefile" ]; then
         cp -r /home/ImageNet/train /home/ImageNet/val
 fi
 
-# download code
-if [ ! -x "apex" ]; then
-        git clone https://github.com/gdfishhannah/apex.git
-elif
-        cd apex
-        git pull
-        cd ..
-fi
-cd apex
+# install apex
+apex_dir=/root/apex
+cd $apex_dir
 python uninstall apex -y
 python setup.py install
-cd examples/imagenet/
+
+cd $apex_dir/examples/imagenet/
 chmod a+x *.sh
 ./DDP.sh
